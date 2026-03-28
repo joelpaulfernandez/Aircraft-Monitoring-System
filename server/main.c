@@ -1,13 +1,9 @@
 /*
- * server/main.c
- * Aircraft Fuel Monitoring System — Server TCP Connection
- *
- * Implements:
- *   initServer()       — REQ-COM-040: TCP socket creation and bind
- *   acceptClient()     — REQ-SVR-010: accept incoming aircraft connections
- *   performHandshake() — REQ-COM-050: handshake before any data packets
- *   validatePacket()   — REQ-COM-060: packet integrity validation
- */
+server/main.c
+Aircraft Fuel Monitoring System — Server TCP Connection
+
+Implements: initServer, acceptClient, performHandshake, validatePacket
+*/
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -19,19 +15,16 @@
 #include "../common/packet.h"
 
 #ifdef _WIN32
-    /* Winsock error code for a failed recv/send due to timeout */
     #define SOCK_TIMEOUT_ERR WSAETIMEDOUT
 #else
     #include <errno.h>
     #define SOCK_TIMEOUT_ERR EAGAIN
 #endif
 
-/* ── Connected client table (module-private) ──────────────────────────────── */
+// Connected client table (module-private)
 static ConnectedClient clients[MAX_CLIENTS];
 
-/* ── Internal helpers ─────────────────────────────────────────────────────── */
-
-/* Returns the index of the slot occupied by aircraftID, or -1 if not found. */
+// Returns the index of the slot with aircraftID, or -1 if not found.
 static int findClientByAircraftID(int aircraftID) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].aircraftID == aircraftID) return i;
@@ -39,7 +32,7 @@ static int findClientByAircraftID(int aircraftID) {
     return -1;
 }
 
-/* Returns the index of the first empty slot (aircraftID == 0), or -1 if full. */
+// Returns the index of the first empty slot, or -1 if full.
 static int findEmptySlot(void) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].aircraftID == 0) return i;
@@ -47,20 +40,14 @@ static int findEmptySlot(void) {
     return -1;
 }
 
-/* ── Public API ───────────────────────────────────────────────────────────── */
-
-/* resetClients — zero the entire client table.
- * Called between unit tests to restore clean state. */
+// Zero the client table. Called between unit tests.
 void resetClients(void) {
     memset(clients, 0, sizeof(clients));
 }
 
-/*
- * initServer — REQ-COM-040
- * Initialise Winsock (Windows), create a TCP socket, set SO_REUSEADDR,
- * bind to SERVER_PORT on all interfaces, and start listening.
- * Returns the listening socket fd, or INVALID_SOCK on any failure.
- */
+// initServer — REQ-COM-040
+// Create TCP socket, bind to SERVER_PORT, start listening.
+// Returns listening fd, or INVALID_SOCK on failure.
 socket_t initServer(void) {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -76,7 +63,6 @@ socket_t initServer(void) {
         return INVALID_SOCK;
     }
 
-    /* Allow fast restart without TIME_WAIT blocking the bind. */
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
@@ -102,13 +88,9 @@ socket_t initServer(void) {
     return fd;
 }
 
-/*
- * acceptClient — REQ-SVR-010
- * Blocks until a client connects. Sets a receive timeout on the new socket
- * so that performHandshake() does not block forever.
- * Logs the client's IP address.
- * Returns the accepted socket fd, or INVALID_SOCK on error.
- */
+// acceptClient — REQ-SVR-010
+// Block until a client connects. Sets a recv timeout for the handshake.
+// Returns the accepted fd, or INVALID_SOCK on error.
 socket_t acceptClient(socket_t serverSocket) {
     struct sockaddr_in clientAddr;
     socklen_t addrLen = sizeof(clientAddr);
@@ -119,14 +101,11 @@ socket_t acceptClient(socket_t serverSocket) {
         return INVALID_SOCK;
     }
 
-    /* Set receive timeout so a slow/silent client doesn't stall the server. */
 #ifdef _WIN32
     DWORD timeout = HANDSHAKE_TIMEOUT * 1000;
     setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
 #else
-    struct timeval tv;
-    tv.tv_sec  = HANDSHAKE_TIMEOUT;
-    tv.tv_usec = 0;
+    struct timeval tv = { HANDSHAKE_TIMEOUT, 0 };
     setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
 
@@ -140,36 +119,27 @@ socket_t acceptClient(socket_t serverSocket) {
     return clientFD;
 }
 
-/*
- * performHandshake — REQ-COM-050
- * Reads the first message from the client and validates it as a handshake
- * request.  Any data that is not a HANDSHAKE_REQ string (e.g. a raw
- * FuelPacket) causes immediate rejection — enforcing REQ-COM-050.
- *
- * On success: registers the client in the tracking table and sends
- *             HANDSHAKE_ACK.  Returns the positive aircraftID.
- * On failure: sends the appropriate HANDSHAKE_REJ_* reply and returns -1.
- */
+// performHandshake — REQ-COM-050
+// Reads the first message. Rejects anything that isn't HANDSHAKE_REQ.
+// On success: registers client, sends HANDSHAKE_ACK, returns aircraftID.
+// On failure: sends HANDSHAKE_REJ_*, returns -1.
 int performHandshake(socket_t clientSocket) {
     char buf[HANDSHAKE_MSG_MAX_LEN];
     memset(buf, 0, sizeof(buf));
 
     int received = (int)recv(clientSocket, buf, sizeof(buf) - 1, 0);
     if (received <= 0) {
-        /* Timeout, disconnection, or error. */
         LOG_ERROR(0, "Handshake recv() failed — client disconnected or timed out");
         send(clientSocket, HANDSHAKE_REJ_INVALID, strlen(HANDSHAKE_REJ_INVALID), 0);
         return -1;
     }
 
-    /* REQ-COM-050: the very first message must be the handshake prefix. */
     if (strncmp(buf, HANDSHAKE_REQ_PREFIX, strlen(HANDSHAKE_REQ_PREFIX)) != 0) {
         LOG_ERROR(0, "Handshake failed — data received before handshake (REQ-COM-050)");
         send(clientSocket, HANDSHAKE_REJ_INVALID, strlen(HANDSHAKE_REJ_INVALID), 0);
         return -1;
     }
 
-    /* Parse the aircraftID that follows the prefix. */
     const char *idStr    = buf + strlen(HANDSHAKE_REQ_PREFIX);
     int         aircraftID = (int)strtol(idStr, NULL, 10);
     if (aircraftID <= 0) {
@@ -178,14 +148,12 @@ int performHandshake(socket_t clientSocket) {
         return -1;
     }
 
-    /* REQ-SVR-010: reject duplicate connections from the same aircraft. */
     if (findClientByAircraftID(aircraftID) != -1) {
         LOG_ERROR(aircraftID, "Handshake failed — duplicate aircraftID");
         send(clientSocket, HANDSHAKE_REJ_DUP, strlen(HANDSHAKE_REJ_DUP), 0);
         return -1;
     }
 
-    /* Find a free slot in the tracking table. */
     int slot = findEmptySlot();
     if (slot == -1) {
         LOG_ERROR(aircraftID, "Handshake failed — server is full");
@@ -193,11 +161,10 @@ int performHandshake(socket_t clientSocket) {
         return -1;
     }
 
-    /* Register client. */
-    clients[slot].aircraftID       = aircraftID;
-    clients[slot].socketFD         = clientSocket;
+    clients[slot].aircraftID        = aircraftID;
+    clients[slot].socketFD          = clientSocket;
     clients[slot].handshakeComplete = true;
-    clients[slot].connectedAt      = time(NULL);
+    clients[slot].connectedAt       = time(NULL);
 
     send(clientSocket, HANDSHAKE_ACK, strlen(HANDSHAKE_ACK), 0);
     LOG_INFO(aircraftID, "Handshake complete — client registered");
@@ -205,14 +172,8 @@ int performHandshake(socket_t clientSocket) {
     return aircraftID;
 }
 
-/*
- * validatePacket — REQ-COM-060
- * Returns true only if all of the following hold:
- *   - packet is not NULL
- *   - header.aircraftID > 0
- *   - body.fuelLevel is in [0.0, 100.0]
- *   - header.timestamp is not 0
- */
+// validatePacket — REQ-COM-060
+// Returns true if: packet != NULL, aircraftID > 0, fuelLevel in [0,100], timestamp != 0.
 bool validatePacket(const FuelPacket *packet) {
     if (packet == NULL)                            return false;
     if (packet->header.aircraftID <= 0)            return false;
@@ -222,7 +183,7 @@ bool validatePacket(const FuelPacket *packet) {
     return true;
 }
 
-/* ── Main server loop ─────────────────────────────────────────────────────── */
+// Main server loop
 #ifndef TESTING
 int main(void) {
     socket_t serverFD = initServer();
@@ -239,25 +200,14 @@ int main(void) {
 
         int aircraftID = performHandshake(clientFD);
         if (aircraftID == -1) {
-            /* Handshake failed — close connection immediately. */
             CLOSE_SOCKET(clientFD);
             continue;
         }
 
-        /*
-         * TODO (Sprint 2): Move each accepted client to a thread or integrate
-         * with select()/poll() for concurrent multi-aircraft packet handling.
-         * For now, the main loop blocks on the next accept() call.
-         */
-
-        /*
-         * TODO (Sprint 2): Implement packet receive loop here.
-         * Receive FuelPacket, call validatePacket(), process fuel state,
-         * send ACK_DIVERT or LANDED_SAFE responses as needed.
-         */
+        // TODO (Sprint 2): handle concurrent clients with threads or select/poll.
+        // TODO (Sprint 2): receive FuelPacket loop, validate, send ACK_DIVERT or LANDED_SAFE.
     }
 
-    /* Unreachable in current form; Sprint 2 will add signal handling. */
     CLOSE_SOCKET(serverFD);
 
 #ifdef _WIN32
@@ -266,4 +216,4 @@ int main(void) {
 
     return EXIT_SUCCESS;
 }
-#endif /* TESTING */
+#endif
