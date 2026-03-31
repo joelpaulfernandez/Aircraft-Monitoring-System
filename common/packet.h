@@ -48,8 +48,8 @@ typedef struct {
 } FuelPacket;
 
 // Fuel thresholds
-#define FUEL_THRESHOLD_LOW      25.0f // REQ-STM-020
-#define FUEL_THRESHOLD_CRITICAL 15.0f // REQ-STM-030
+#define FUEL_THRESHOLD_LOW       25.0f // REQ-STM-020
+#define FUEL_THRESHOLD_CRITICAL  15.0f // REQ-STM-030
 
 // Utility functions
 FuelPacket *createPacket(int aircraftID, PacketType type);

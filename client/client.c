@@ -11,6 +11,7 @@ Implements: connectToServer, sendHandshake, sendFuelPacket, disconnectFromServer
 
 #include "include/client.h"
 #include "../common/packet.h"
+#include <stdint.h>
 
 #define HANDSHAKE_BUF_LEN 64
 
