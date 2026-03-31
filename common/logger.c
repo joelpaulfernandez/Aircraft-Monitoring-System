@@ -1,16 +1,10 @@
 /*
- * common/logger.c
- * Aircraft Fuel Monitoring System — Logger
- *
- * Implements:
- *   logInit()  — open/create the .log file
- *   logWrite() — REQ-LOG-060: write formatted entry to file and stderr
- *   logClose() — close the log file
- *
- * Log entry format (REQ-LOG-060):
- *   DateTime | TYPE    | AircraftID | Details
- *   e.g.: 2026-03-27 14:05:00 | INFO    | AC-1  | Fuel status received
- */
+common/logger.c
+Aircraft Fuel Monitoring System — Logger
+
+Implements: logInit, logWrite, logClose
+Log format (REQ-LOG-060): DateTime | TYPE    | AircraftID | Details
+*/
 
 #include "logger.h"
 
@@ -19,9 +13,14 @@
 
 static FILE *logFile = NULL;
 
-// logInit — open (or create) the log file for appending.
+// logInit — open the log file for appending; closes any previously open handle.
 // Returns 0 on success, -1 on failure.
 int logInit(const char *filename) {
+    if (filename == NULL) return -1;
+    if (logFile != NULL) {
+        fclose(logFile);
+        logFile = NULL;
+    }
     logFile = fopen(filename, "a");
     if (logFile == NULL) return -1;
     setvbuf(logFile, NULL, _IONBF, 0); // write immediately, no buffering
@@ -29,11 +28,19 @@ int logInit(const char *filename) {
 }
 
 // logWrite — REQ-LOG-060
-// Writes to both the log file and stderr so nothing is lost.
+// Write a formatted entry to the log file and mirror it to stderr.
 void logWrite(int aircraftID, LogLevel level, const char *details) {
+    if (details == NULL) details = "(null)";
+
     time_t now = time(NULL);
     char timeBuf[20];
-    strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    struct tm tmBuf;
+    struct tm *tm = localtime_r(&now, &tmBuf);
+    if (tm != NULL) {
+        strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", tm);
+    } else {
+        snprintf(timeBuf, sizeof(timeBuf), "0000-00-00 00:00:00");
+    }
 
     const char *levelStr;
     switch (level) {

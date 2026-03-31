@@ -1,12 +1,9 @@
 /*
- * common/packet.c
- * Aircraft Fuel Monitoring System — Packet Utilities
- *
- * Implements:
- *   createPacket()    — allocate and initialise a FuelPacket
- *   freePacket()      — release a FuelPacket and its dynamic fields
- *   setAlertMessage() — REQ-PKT-070: set the dynamically allocated alert message
- */
+common/packet.c
+Aircraft Fuel Monitoring System — Packet Utilities
+
+Implements: createPacket, freePacket, setAlertMessage
+*/
 
 #include "packet.h"
 
@@ -14,12 +11,12 @@
 #include <string.h>
 #include <time.h>
 
+// NOTE: not thread-safe — assumes single-threaded use.
+// Use _Atomic or a mutex if concurrent packet creation is needed.
 static int nextPacketID = 1;
 
-// createPacket
-// Allocates a zeroed FuelPacket, fills header fields, and returns it.
-// Body fields (fuelLevel, consumptionRate, etc.) are left at 0 for the caller to set.
-// Returns NULL on allocation failure.
+// createPacket — allocate and zero a FuelPacket, fill header fields.
+// Body fields default to 0. Returns NULL on allocation failure.
 FuelPacket *createPacket(int aircraftID, PacketType type) {
     FuelPacket *packet = (FuelPacket *)calloc(1, sizeof(FuelPacket));
     if (packet == NULL) return NULL;
@@ -32,8 +29,7 @@ FuelPacket *createPacket(int aircraftID, PacketType type) {
     return packet;
 }
 
-// freePacket
-// Frees the dynamically allocated alertMessage (REQ-PKT-070) then the packet itself.
+// freePacket — free alertMessage (REQ-PKT-070) then the packet.
 void freePacket(FuelPacket *packet) {
     if (packet == NULL) return;
     if (packet->body.alertMessage != NULL) {
@@ -44,15 +40,16 @@ void freePacket(FuelPacket *packet) {
 }
 
 // setAlertMessage — REQ-PKT-070
-// Copies message into a newly allocated buffer on the packet.
-// Frees any previously set message first.
-void setAlertMessage(FuelPacket *packet, const char *message) {
-    if (packet == NULL || message == NULL) return;
+// Allocate-then-swap: old message is preserved on malloc failure.
+// Returns 0 on success, -1 on failure.
+int setAlertMessage(FuelPacket *packet, const char *message) {
+    if (packet == NULL || message == NULL) return -1;
 
+    char *newMsg = (char *)malloc(strlen(message) + 1);
+    if (newMsg == NULL) return -1;
+
+    strcpy(newMsg, message);
     free(packet->body.alertMessage);
-
-    packet->body.alertMessage = (char *)malloc(strlen(message) + 1);
-    if (packet->body.alertMessage != NULL) {
-        strcpy(packet->body.alertMessage, message);
-    }
+    packet->body.alertMessage = newMsg;
+    return 0;
 }

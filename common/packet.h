@@ -54,6 +54,6 @@ typedef struct {
 // Utility functions
 FuelPacket *createPacket(int aircraftID, PacketType type);
 void freePacket(FuelPacket *packet);
-void setAlertMessage(FuelPacket *packet, const char *message);
+int setAlertMessage(FuelPacket *packet, const char *message);
 
 #endif /* PACKET_H */

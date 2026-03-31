@@ -178,6 +178,36 @@ static void test_logClose_idempotent(void) {
     TEST_ASSERT(true, "logClose() called twice does not crash");
 }
 
+// ── logInit double call ───────────────────────────────────────────────────────
+
+// Test 11: logInit called twice closes the first handle and opens a new one
+static void test_logInit_double_call(void) {
+    int r1 = logInit(TEST_LOG_FILE);
+    int r2 = logInit(TEST_LOG_FILE); // should close previous handle first
+    TEST_ASSERT(r1 == 0, "First logInit() returns 0");
+    TEST_ASSERT(r2 == 0, "Second logInit() returns 0 (no file-handle leak)");
+    LOG_INFO(1, "Written after second logInit");
+    logClose();
+
+    char line[256] = {0};
+    bool got = readFirstLogLine(line, sizeof(line));
+    TEST_ASSERT(got, "Log file contains a line after double logInit");
+}
+
+// ── logWrite unknown LogLevel ─────────────────────────────────────────────────
+
+// Test 12: logWrite with an invalid LogLevel value writes "UNKNOWN" to the log
+static void test_logWrite_unknown_level(void) {
+    logInit(TEST_LOG_FILE);
+    logWrite(1, (LogLevel)99, "Unknown level message");
+    logClose();
+
+    char line[256] = {0};
+    readFirstLogLine(line, sizeof(line));
+    TEST_ASSERT(strstr(line, "UNKNOWN") != NULL,
+                "logWrite() with invalid LogLevel writes \"UNKNOWN\" to log");
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 int main(void) {
@@ -193,6 +223,8 @@ int main(void) {
     RUN_TEST(test_logWrite_multiple_entries);
     RUN_TEST(test_logWrite_before_init_no_crash);
     RUN_TEST(test_logClose_idempotent);
+    RUN_TEST(test_logInit_double_call);
+    RUN_TEST(test_logWrite_unknown_level);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_run - tests_failed, tests_run);
     return (tests_failed == 0) ? EXIT_SUCCESS : EXIT_FAILURE;

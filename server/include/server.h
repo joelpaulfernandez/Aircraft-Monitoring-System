@@ -51,23 +51,8 @@ typedef struct {
     time_t    connectedAt;
 } ConnectedClient;
 
-// Logging macros — format: DateTime | TYPE | AircraftID | Details
-#include <stdio.h>
-#include <time.h>
-
-#define LOG_INFO(aircraftID, details) do {                                     \
-    time_t _t = time(NULL);                                                    \
-    char _buf[20];                                                             \
-    strftime(_buf, sizeof(_buf), "%Y-%m-%d %H:%M:%S", localtime(&_t));        \
-    fprintf(stderr, "%s | INFO  | AC-%d | %s\n", _buf, (aircraftID), (details)); \
-} while (0)
-
-#define LOG_ERROR(aircraftID, details) do {                                    \
-    time_t _t = time(NULL);                                                    \
-    char _buf[20];                                                             \
-    strftime(_buf, sizeof(_buf), "%Y-%m-%d %H:%M:%S", localtime(&_t));        \
-    fprintf(stderr, "%s | ERROR | AC-%d | %s\n", _buf, (aircraftID), (details)); \
-} while (0)
+// Use the common logger for all log output
+#include "../../common/logger.h"
 
 // Public API
 

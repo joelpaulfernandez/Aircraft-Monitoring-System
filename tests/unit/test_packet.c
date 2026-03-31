@@ -126,11 +126,12 @@ static void test_freePacket_frees_alert_message(void) {
 
 // ── setAlertMessage ──────────────────────────────────────────────────────────
 
-// Test 9: setAlertMessage stores the correct string (REQ-PKT-070)
+// Test 9: setAlertMessage returns 0 and stores the correct string (REQ-PKT-070)
 static void test_setAlertMessage_stores_message(void) {
     FuelPacket *pkt = createPacket(1, FUEL_STATUS);
     TEST_ASSERT(pkt != NULL, "createPacket() succeeds");
-    setAlertMessage(pkt, "Critical fuel level");
+    int result = setAlertMessage(pkt, "Critical fuel level");
+    TEST_ASSERT(result == 0, "setAlertMessage() returns 0 on success");
     TEST_ASSERT(pkt->body.alertMessage != NULL,
                 "setAlertMessage() sets alertMessage to non-NULL (REQ-PKT-070)");
     TEST_ASSERT(strcmp(pkt->body.alertMessage, "Critical fuel level") == 0,
@@ -149,18 +150,31 @@ static void test_setAlertMessage_replaces_message(void) {
     freePacket(pkt);
 }
 
-// Test 11: setAlertMessage with NULL packet does not crash
+// Test 11: setAlertMessage with NULL packet returns -1
 static void test_setAlertMessage_null_packet_safe(void) {
-    setAlertMessage(NULL, "test");
-    TEST_ASSERT(true, "setAlertMessage(NULL, msg) does not crash");
+    int result = setAlertMessage(NULL, "test");
+    TEST_ASSERT(result == -1, "setAlertMessage(NULL, msg) returns -1");
 }
 
-// Test 12: setAlertMessage with NULL message does not crash
+// Test 12: setAlertMessage with NULL message returns -1 and does not crash
 static void test_setAlertMessage_null_message_safe(void) {
     FuelPacket *pkt = createPacket(1, FUEL_STATUS);
     TEST_ASSERT(pkt != NULL, "createPacket() succeeds");
-    setAlertMessage(pkt, NULL);
-    TEST_ASSERT(true, "setAlertMessage(pkt, NULL) does not crash");
+    int result = setAlertMessage(pkt, NULL);
+    TEST_ASSERT(result == -1, "setAlertMessage(pkt, NULL) returns -1");
+    freePacket(pkt);
+}
+
+// Test 13: setAlertMessage with empty string stores an empty string
+static void test_setAlertMessage_empty_string(void) {
+    FuelPacket *pkt = createPacket(1, FUEL_STATUS);
+    TEST_ASSERT(pkt != NULL, "createPacket() succeeds");
+    int result = setAlertMessage(pkt, "");
+    TEST_ASSERT(result == 0, "setAlertMessage(pkt, \"\") returns 0");
+    TEST_ASSERT(pkt->body.alertMessage != NULL,
+                "setAlertMessage() sets alertMessage to non-NULL for empty string");
+    TEST_ASSERT(strcmp(pkt->body.alertMessage, "") == 0,
+                "setAlertMessage() stores an empty string correctly");
     freePacket(pkt);
 }
 
@@ -183,6 +197,7 @@ int main(void) {
     RUN_TEST(test_setAlertMessage_replaces_message);
     RUN_TEST(test_setAlertMessage_null_packet_safe);
     RUN_TEST(test_setAlertMessage_null_message_safe);
+    RUN_TEST(test_setAlertMessage_empty_string);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_run - tests_failed, tests_run);
     return (tests_failed == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
