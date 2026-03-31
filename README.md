@@ -11,33 +11,32 @@ detects critical fuel states, and issues emergency divert commands when necessar
 - Joel Paul Fernandez
 
 ## Tech Stack
-- Language: C
-- Communication: TCP/IP (Winsock2 on Windows / sys/socket on Linux)
-- Testing: MSTest
-- Version Control: GitHub
+- **Language**: C (C11)
+- **Communication**: TCP/IP (Winsock2 on Windows / sys/socket on Linux)
+- **Testing**: Custom C Unit Testing Harness (Integrated in Makefile)
+- **Version Control**: GitHub
 
 ## Project Structure
 ```
-aircraft-fuel-monitoring-system/
+Aircraft-Monitoring-System/
+├── bin/                    # Compiled binaries (git ignored)
 ├── client/
-│   ├── main.c              # Client entry point
-│   └── src/
-│       ├── state_machine.h # Fuel state machine (REQ-STM-010~040)
-│       └── state_machine.c
+│   ├── include/            # Client-specific headers
+│   ├── aircraft_state_machine.c # Fuel state machine logic (REQ-STM-010~040)
+│   ├── client.c            # Client communication logic
+│   └── main.c              # Client entry point
 ├── server/
-│   └── main.c              # Server entry point
-├── packet/
-│   ├── packet.h            # FuelPacket struct definition
-│   ├── packet.c            # Packet utility functions
-│   ├── logger.h            # Logging interface (REQ-LOG-060)
-│   └── logger.c            # Logging implementation
-├── docs/
-│   └── requirements/       # Project requirements documents
+│   ├── include/            # Server-specific headers
+│   └── main.c              # Server entry point / logic
+├── common/
+│   ├── packet.h/c          # FuelPacket struct and utility functions
+│   └── logger.h/c          # Logging interface and implementation (REQ-LOG-060)
 ├── tests/
-│   ├── unit/               # MSTest unit tests
-│   └── integration/        # Integration tests
-├── logs/                   # Runtime log files (git ignored)
-│   └── .gitkeep
+│   └── unit/               # Unit tests for each module
+│       ├── test_fuel_system.c
+│       ├── test_client_connection.c
+│       └── test_server_connection.c
+├── Makefile                # Build system
 └── README.md
 ```
 
@@ -45,47 +44,49 @@ aircraft-fuel-monitoring-system/
 | State | Condition |
 |-------|-----------|
 | Normal Cruise | Fuel > 25% |
-| Low Fuel Warning | Fuel < 25% |
-| Critical Fuel | Fuel < 15% |
+| Low Fuel Warning | Fuel <= 25% |
+| Critical Fuel | Fuel <= 15% |
 | Emergency Divert | Divert command received from server |
 | Landed Safe | Aircraft confirmed landing |
 
 ## Data Packet Structure
 ```c
-FuelPacket {
-    PacketHeader {
-        packetID, type, aircraftID, timestamp
-    }
-    PacketBody {
-        fuelLevel, consumptionRate, flightTimeRemaining,
-        nearestAirportID, destinationAirportID,
-        timeToDestination, currentState,
-        emergencyFlag, alertMessage*  // dynamically allocated
-    }
-}
+typedef struct {
+    PacketHeader header;    // ID, type, aircraftID, timestamp
+    PacketBody body;        // fuelLevel, consumptionRate, states, etc.
+} FuelPacket;
 ```
 
-## Sprint Plan
-### Sprint 1
-- TCP/IP connection setup
-- 3-way handshake verification
-- Data packet structure
-- State machine skeleton
-- Basic logging
-- Basic tests
+## Build and Test Instructions
 
-### Sprint 2
-- Fuel threshold detection logic
-- Emergency divert command and ACK handling
-- Divert decision logic (flightTimeRemaining vs timeToDestination)
-- 1MB telemetry file transfer
-- Logging format finalization
-- UI implementation
-- Full unit tests
+### Build Server
+```bash
+# Build server
+make server
+```
+
+### Run Unit Tests
+Tests are implemented using a custom C testing harness to ensure compatibility and lightweight execution without external dependencies.
+
+```bash
+# Run specific tests
+make test_fuel_system
+make test_client_connection
+make test_server_connection
+make test_packet
+make test_logger
+```
+
+## Project Progress (Phase 1)
+- [x] TCP/IP Socket connection setup
+- [x] 3-way handshake verification logic
+- [x] Data packet (FuelPacket) structure definition
+- [x] Fuel State Machine skeleton and threshold logic
+- [x] Basic synchronous logging system
+- [x] Unit tests for core modules (Fuel, Packet, Connection)
 
 ## Log Format
 ```
 DateTime | TYPE | AircraftID | Details
-2026-03-04 10:32:11 | PACKET_RECV | AC-101 | Fuel: 12.4% | State: CRITICAL_FUEL
-2026-03-04 10:32:12 | DIVERT | AC-101 | DIVERT_CMD | AssignedAirport: 1002
+2026-03-30 21:45:11 | PACKET_RECV | AC-101 | Fuel: 12.4% | State: CRITICAL_FUEL
 ```
