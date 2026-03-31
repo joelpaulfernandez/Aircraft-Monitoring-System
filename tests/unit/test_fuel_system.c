@@ -79,20 +79,20 @@ static void test_fuel_at_critical_threshold_is_critical(void) {
               "Fuel == CRITICAL threshold => STATE_CRITICAL_FUEL");
 }
 
-static void test_fuel_below_critical_is_critical(void) {
+static void test_fuel_below_critical_stays_critical(void) {
   AircraftStateMachine sm;
   smInit(&sm, 1);
   smUpdateFuel(&sm, 5.0f);
   TEST_ASSERT(smGetState(&sm) == STATE_CRITICAL_FUEL,
-              "Fuel below CRITICAL threshold => STATE_CRITICAL_FUEL");
+              "Fuel below CRITICAL threshold => STATE_CRITICAL_FUEL (server decides emergency)");
 }
 
-static void test_fuel_zero_is_critical(void) {
+static void test_fuel_zero_stays_critical(void) {
   AircraftStateMachine sm;
   smInit(&sm, 1);
   smUpdateFuel(&sm, 0.0f);
   TEST_ASSERT(smGetState(&sm) == STATE_CRITICAL_FUEL,
-              "Fuel 0% (without divert ACK) => STATE_CRITICAL_FUEL");
+              "Fuel 0% without server divert command => STATE_CRITICAL_FUEL");
 }
 
 // ---------- smUpdateFuel — input validation ----------
@@ -204,8 +204,8 @@ int main(void) {
   RUN_TEST(test_fuel_at_low_threshold_is_low_fuel);
   RUN_TEST(test_fuel_between_low_and_critical_is_low_fuel);
   RUN_TEST(test_fuel_at_critical_threshold_is_critical);
-  RUN_TEST(test_fuel_below_critical_is_critical);
-  RUN_TEST(test_fuel_zero_is_critical);
+  RUN_TEST(test_fuel_below_critical_stays_critical);
+  RUN_TEST(test_fuel_zero_stays_critical);
 
   RUN_TEST(test_negative_fuel_rejected);
   RUN_TEST(test_fuel_over_100_rejected);
