@@ -1,35 +1,36 @@
 #ifndef AIRCRAFT_STATE_MACHINE_H
 #define AIRCRAFT_STATE_MACHINE_H
 
-#include <string>
+#include <stdbool.h>
+#include "../../common/packet.h"
 
-// Aircraft states
-enum class AircraftState {
-    NORMAL_CRUISE,
-    LOW_FUEL_WARNING,
-    CRITICAL_FUEL,
-    EMERGENCY_DIVERT,
-    LANDED_SAFE
-};
+// State machine instance — one per aircraft
+typedef struct {
+  int       aircraftID;
+  FuelState currentState;
+  float     fuelLevel;
+  bool      landed;
+} AircraftStateMachine;
 
-// State machine class
-class AircraftStateMachine {
-private:
-    AircraftState currentState;
-    double fuelLevel;
-    bool landed;
+// Initialize sm for the given aircraft. Sets fuel to 100% and state to STATE_NORMAL_CRUISE.
+void smInit(AircraftStateMachine *sm, int aircraftID);
 
-public:
-    AircraftStateMachine();
+// Update fuel level. Returns 0 on success, -1 if fuel is out of range [0, 100].
+// State is not modified on invalid input.
+int smUpdateFuel(AircraftStateMachine *sm, float fuel);
 
-    void updateFuel(double fuel);
-    void setLanded(bool status);
+// Set emergency divert state. Called when an ACK_DIVERT packet is received from
+// the server. Once set, fuel updates no longer change the state.
+void smSetEmergencyDivert(AircraftStateMachine *sm);
 
-    AircraftState getState() const;
-    std::string getStateString() const;
+// Mark the aircraft as landed. Transitions state to STATE_LANDED_SAFE.
+// If called during an emergency state, a warning is printed to stderr.
+void smSetLanded(AircraftStateMachine *sm, bool landed);
 
-private:
-    void updateState();
-};
+// Return the current state.
+FuelState smGetState(const AircraftStateMachine *sm);
 
-#endif
+// Return a human-readable label for the current state.
+const char *smGetStateString(const AircraftStateMachine *sm);
+
+#endif /* AIRCRAFT_STATE_MACHINE_H */
