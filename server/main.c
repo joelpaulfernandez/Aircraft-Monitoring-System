@@ -24,6 +24,9 @@ Implements: initServer, acceptClient, performHandshake, validatePacket
 // Connected client table (module-private)
 static ConnectedClient clients[MAX_CLIENTS];
 
+// Aircraft fuel tracking table (module-private)
+static AircraftRecord aircraftRecords[MAX_AIRCRAFT];
+
 // Returns the index of the slot with aircraftID, or -1 if not found.
 static int findClientByAircraftID(int aircraftID) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -43,6 +46,118 @@ static int findEmptySlot(void) {
 // Zero the client table. Called between unit tests.
 void resetClients(void) {
     memset(clients, 0, sizeof(clients));
+}
+
+// ─── Aircraft record helpers ────────────────────────────────────────
+
+// Returns the index of the slot with aircraftID, or -1 if not found.
+static int findAircraftRecord(int aircraftID) {
+    for (int i = 0; i < MAX_AIRCRAFT; i++) {
+        if (aircraftRecords[i].aircraftID == aircraftID) return i;
+    }
+    return -1;
+}
+
+// Returns the index of the first empty aircraft record slot, or -1 if full.
+static int findEmptyAircraftSlot(void) {
+    for (int i = 0; i < MAX_AIRCRAFT; i++) {
+        if (aircraftRecords[i].aircraftID == 0) return i;
+    }
+    return -1;
+}
+
+// Returns a human-readable string for a FuelState enum value.
+static const char *fuelStateToString(FuelState state) {
+    switch (state) {
+        case STATE_NORMAL_CRUISE:    return "NORMAL_CRUISE";
+        case STATE_LOW_FUEL:         return "LOW_FUEL";
+        case STATE_CRITICAL_FUEL:    return "CRITICAL_FUEL";
+        case STATE_EMERGENCY_DIVERT: return "EMERGENCY_DIVERT";
+        case STATE_LANDED_SAFE:      return "LANDED_SAFE";
+        default:                     return "UNKNOWN";
+    }
+}
+
+// Determine fuel state from fuel level using threshold constants.
+// Boundary logic matches client state machine:
+//   fuel > 25.0 -> NORMAL_CRUISE
+//   fuel > 15.0 -> LOW_FUEL
+//   fuel <= 15.0 -> CRITICAL_FUEL
+static FuelState determineFuelState(float fuelLevel) {
+    if (fuelLevel > FUEL_THRESHOLD_LOW)      return STATE_NORMAL_CRUISE;
+    if (fuelLevel > FUEL_THRESHOLD_CRITICAL)  return STATE_LOW_FUEL;
+    return STATE_CRITICAL_FUEL;
+}
+
+// Zero the aircraft records table. Called between unit tests.
+void resetAircraftRecords(void) {
+    memset(aircraftRecords, 0, sizeof(aircraftRecords));
+}
+
+// Look up an AircraftRecord by aircraftID. Returns pointer or NULL.
+AircraftRecord *getAircraftRecord(int aircraftID) {
+    int idx = findAircraftRecord(aircraftID);
+    if (idx == -1) return NULL;
+    return &aircraftRecords[idx];
+}
+
+// checkFuelThresholds — REQ-STM-010, REQ-STM-020, REQ-STM-030, REQ-LOG-030
+// Determine FuelState from packet fuel level. If a record exists for this
+// aircraft, detect and log state transitions.
+FuelState checkFuelThresholds(const FuelPacket *packet) {
+    if (packet == NULL) return STATE_NORMAL_CRUISE;
+
+    FuelState newState = determineFuelState(packet->body.fuelLevel);
+
+    int idx = findAircraftRecord(packet->header.aircraftID);
+    if (idx != -1) {
+        FuelState oldState = aircraftRecords[idx].currentState;
+        if (oldState != newState) {
+            char logMsg[128];
+            snprintf(logMsg, sizeof(logMsg),
+                     "State transition: %s -> %s | Fuel: %.1f%%",
+                     fuelStateToString(oldState),
+                     fuelStateToString(newState),
+                     packet->body.fuelLevel);
+
+            if (newState == STATE_CRITICAL_FUEL) {
+                LOG_ERROR(packet->header.aircraftID, logMsg);
+            } else if (newState == STATE_LOW_FUEL) {
+                LOG_WARNING(packet->header.aircraftID, logMsg);
+            } else {
+                LOG_INFO(packet->header.aircraftID, logMsg);
+            }
+        }
+    }
+
+    return newState;
+}
+
+// updateAircraftRecord — REQ-SVR-020
+// Update or create the server-side AircraftRecord for the aircraft in the packet.
+// Returns 0 on success, -1 if the table is full or packet is NULL.
+int updateAircraftRecord(const FuelPacket *packet) {
+    if (packet == NULL) return -1;
+
+    int idx = findAircraftRecord(packet->header.aircraftID);
+    if (idx == -1) {
+        idx = findEmptyAircraftSlot();
+        if (idx == -1) return -1;
+        aircraftRecords[idx].aircraftID = packet->header.aircraftID;
+    }
+
+    // Detect and log state transition before updating the record
+    FuelState newState = checkFuelThresholds(packet);
+
+    aircraftRecords[idx].currentState        = newState;
+    aircraftRecords[idx].lastFuelLevel       = packet->body.fuelLevel;
+    aircraftRecords[idx].nearestAirportID    = packet->body.nearestAirportID;
+    aircraftRecords[idx].destinationAirportID = packet->body.destinationAirportID;
+    aircraftRecords[idx].flightTimeRemaining = packet->body.flightTimeRemaining;
+    aircraftRecords[idx].timeToDestination   = packet->body.timeToDestination;
+    aircraftRecords[idx].isActive            = true;
+
+    return 0;
 }
 
 // initServer — REQ-COM-040

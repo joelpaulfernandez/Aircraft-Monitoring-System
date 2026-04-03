@@ -51,6 +51,23 @@ typedef struct {
     time_t    connectedAt;
 } ConnectedClient;
 
+// Maximum tracked aircraft (matches MAX_CLIENTS)
+#define MAX_AIRCRAFT MAX_CLIENTS
+
+// Server-side aircraft fuel tracking record (REQ-SVR-020)
+typedef struct {
+    int         aircraftID;          // 0 = empty slot
+    FuelState   currentState;
+    float       lastFuelLevel;
+    int         nearestAirportID;
+    int         destinationAirportID;
+    float       flightTimeRemaining;
+    float       timeToDestination;
+    bool        isActive;
+    bool        awaitingACK;
+    time_t      divertCommandTime;
+} AircraftRecord;
+
 // Use the common logger for all log output
 #include "../../common/logger.h"
 
@@ -74,5 +91,21 @@ bool validatePacket(const FuelPacket *packet);
 
 // Zero the client tracking array. Call between unit tests.
 void resetClients(void);
+
+// Determine the FuelState from a packet's fuel level and detect state
+// transitions. Logs transitions via the common logger. (REQ-STM-010/020/030, REQ-LOG-030)
+// Returns the determined FuelState.
+FuelState checkFuelThresholds(const FuelPacket *packet);
+
+// Update (or create) the server-side AircraftRecord for the aircraft
+// identified in the packet. (REQ-SVR-020)
+// Returns 0 on success, -1 if the records table is full or packet is NULL.
+int updateAircraftRecord(const FuelPacket *packet);
+
+// Zero the aircraft records table. Call between unit tests.
+void resetAircraftRecords(void);
+
+// Look up an AircraftRecord by aircraftID. Returns pointer or NULL.
+AircraftRecord *getAircraftRecord(int aircraftID);
 
 #endif /* SERVER_H */
