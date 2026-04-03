@@ -160,6 +160,59 @@ int updateAircraftRecord(const FuelPacket *packet) {
     return 0;
 }
 
+// evaluateDivertDecision — REQ-SVR-030
+// Apply US5 divert decision logic: only divert when in CRITICAL_FUEL and
+// flightTimeRemaining < timeToDestination. Returns true if divert is needed.
+bool evaluateDivertDecision(int aircraftID) {
+    int idx = findAircraftRecord(aircraftID);
+    if (idx == -1) return false;
+
+    AircraftRecord *rec = &aircraftRecords[idx];
+
+    // Only evaluate divert for CRITICAL_FUEL state
+    if (rec->currentState != STATE_CRITICAL_FUEL) return false;
+
+    // US5: divert if aircraft cannot reach destination
+    if (rec->flightTimeRemaining < rec->timeToDestination) return true;
+
+    return false;
+}
+
+// broadcastDivertCommand — REQ-SVR-050, REQ-LOG-040
+// Issue a divert command for the given aircraft. Updates record state,
+// records timestamp, and sends DIVERT_CMD over TCP if connected.
+// Returns 0 on success, -1 on failure.
+int broadcastDivertCommand(int aircraftID) {
+    int idx = findAircraftRecord(aircraftID);
+    if (idx == -1) return -1;
+
+    AircraftRecord *rec = &aircraftRecords[idx];
+
+    // Do not re-issue if already awaiting ACK
+    if (rec->awaitingACK) return -1;
+
+    // Update record to EMERGENCY_DIVERT state
+    rec->currentState     = STATE_EMERGENCY_DIVERT;
+    rec->awaitingACK      = true;
+    rec->divertCommandTime = time(NULL);
+
+    // Log the divert command (REQ-LOG-040)
+    char logMsg[128];
+    snprintf(logMsg, sizeof(logMsg),
+             "DIVERT_CMD | AssignedAirport: %d",
+             rec->nearestAirportID);
+    LOG_WARNING(aircraftID, logMsg);
+
+    // Send DIVERT_CMD over TCP to client if connected
+    int clientIdx = findClientByAircraftID(aircraftID);
+    if (clientIdx != -1 && clients[clientIdx].handshakeComplete) {
+        const char *cmd = "DIVERT_CMD\n";
+        send(clients[clientIdx].socketFD, cmd, (int)strlen(cmd), 0);
+    }
+
+    return 0;
+}
+
 // initServer — REQ-COM-040
 // Create TCP socket, bind to SERVER_PORT, start listening.
 // Returns listening fd, or INVALID_SOCK on failure.

@@ -108,4 +108,15 @@ void resetAircraftRecords(void);
 // Look up an AircraftRecord by aircraftID. Returns pointer or NULL.
 AircraftRecord *getAircraftRecord(int aircraftID);
 
+// Evaluate whether a divert command should be issued for the given aircraft.
+// Returns true if the aircraft is in CRITICAL_FUEL state and
+// flightTimeRemaining < timeToDestination (US5 logic). (REQ-SVR-030)
+bool evaluateDivertDecision(int aircraftID);
+
+// Issue a divert command for the given aircraft. Sets the record to
+// EMERGENCY_DIVERT, records divertCommandTime, and sets awaitingACK.
+// Sends DIVERT_CMD over the aircraft's TCP connection if available.
+// Returns 0 on success, -1 on failure. (REQ-SVR-050, REQ-LOG-040)
+int broadcastDivertCommand(int aircraftID);
+
 #endif /* SERVER_H */
