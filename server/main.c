@@ -160,6 +160,39 @@ int updateAircraftRecord(const FuelPacket *packet) {
     return 0;
 }
 
+// sendStatusResponse — Request-Reply: send current fuel state back to client
+// Called after FUEL_STATUS processing when no divert is issued.
+static int sendStatusResponse(socket_t clientFD, int aircraftID, FuelState state) {
+    FuelPacket resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.type       = FUEL_STATUS;
+    resp.header.aircraftID = aircraftID;
+    resp.header.timestamp  = time(NULL);
+    resp.body.currentState = state;
+    ssize_t sent = send(clientFD, &resp, sizeof(resp), 0);
+    return (sent == (ssize_t)sizeof(resp)) ? 0 : -1;
+}
+
+// handleAckDivert — clear awaitingACK when client confirms divert
+static void handleAckDivert(int aircraftID) {
+    AircraftRecord *rec = getAircraftRecord(aircraftID);
+    if (rec == NULL) return;
+    rec->awaitingACK = false;
+    LOG_INFO(aircraftID, "ACK_DIVERT received — divert confirmed");
+}
+
+// removeClientSlot — clear connected client entry on disconnect
+static void removeClientSlot(int aircraftID) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].aircraftID == aircraftID) {
+            clients[i].aircraftID        = 0;
+            clients[i].socketFD          = INVALID_SOCK;
+            clients[i].handshakeComplete = false;
+            break;
+        }
+    }
+}
+
 // evaluateDivertDecision — REQ-SVR-030
 // Apply US5 divert decision logic: only divert when in CRITICAL_FUEL and
 // flightTimeRemaining < timeToDestination. Returns true if divert is needed.
@@ -203,11 +236,16 @@ int broadcastDivertCommand(int aircraftID) {
              rec->nearestAirportID);
     LOG_WARNING(aircraftID, logMsg);
 
-    // Send DIVERT_CMD over TCP to client if connected
+    // Send DIVERT_CMD packet over TCP to client if connected
     int clientIdx = findClientByAircraftID(aircraftID);
     if (clientIdx != -1 && clients[clientIdx].handshakeComplete) {
-        const char *cmd = "DIVERT_CMD\n";
-        send(clients[clientIdx].socketFD, cmd, (int)strlen(cmd), 0);
+        FuelPacket divertPkt;
+        memset(&divertPkt, 0, sizeof(divertPkt));
+        divertPkt.header.type        = DIVERT_CMD;
+        divertPkt.header.aircraftID  = aircraftID;
+        divertPkt.header.timestamp   = time(NULL);
+        divertPkt.body.nearestAirportID = rec->nearestAirportID;
+        send(clients[clientIdx].socketFD, &divertPkt, sizeof(divertPkt), 0);
     }
 
     return 0;
@@ -372,8 +410,44 @@ int main(void) {
             continue;
         }
 
-        // TODO (Sprint 2): handle concurrent clients with threads or select/poll.
-        // TODO (Sprint 2): receive FuelPacket loop, validate, send ACK_DIVERT or LANDED_SAFE.
+        // Receive FuelPacket loop (single-threaded: one client at a time).
+        FuelPacket pkt;
+        while (1) {
+            ssize_t n = recv(clientFD, &pkt, sizeof(FuelPacket), MSG_WAITALL);
+            if (n != (ssize_t)sizeof(FuelPacket)) break; // disconnect or error
+
+            if (!validatePacket(&pkt)) {
+                LOG_WARNING(aircraftID, "Invalid packet — skipping");
+                continue;
+            }
+            if (pkt.header.aircraftID != aircraftID) {
+                LOG_WARNING(aircraftID, "Packet aircraftID mismatch — skipping");
+                continue;
+            }
+
+            if (pkt.header.type == ACK_DIVERT) {
+                handleAckDivert(aircraftID);
+                continue;
+            }
+
+            if (pkt.header.type == LANDED_SAFE) {
+                LOG_INFO(aircraftID, "Aircraft reported LANDED_SAFE");
+                break;
+            }
+
+            // FUEL_STATUS: update record, evaluate divert decision
+            updateAircraftRecord(&pkt);
+            FuelState state = checkFuelThresholds(&pkt);
+
+            if (evaluateDivertDecision(aircraftID)) {
+                broadcastDivertCommand(aircraftID); // sends DIVERT_CMD as reply
+            } else {
+                sendStatusResponse(clientFD, aircraftID, state);
+            }
+        }
+
+        CLOSE_SOCKET(clientFD);
+        removeClientSlot(aircraftID);
     }
 
     CLOSE_SOCKET(serverFD);

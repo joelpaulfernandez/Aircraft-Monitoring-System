@@ -8,6 +8,7 @@ Implements: connectToServer, sendHandshake, sendFuelPacket, disconnectFromServer
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "include/client.h"
 #include "../common/packet.h"
@@ -57,6 +58,25 @@ int sendHandshake(socket_t fd, int aircraftID) {
 // Send raw FuelPacket bytes. Returns 0 on success, -1 on failure.
 int sendFuelPacket(socket_t fd, const FuelPacket *packet) {
     ssize_t sent = send(fd, packet, sizeof(FuelPacket), 0);
+    return (sent == (ssize_t)sizeof(FuelPacket)) ? 0 : -1;
+}
+
+// Blocking recv of a FuelPacket response from the server.
+// Returns 0 on success, -1 on disconnect or error.
+int recvServerResponse(socket_t fd, FuelPacket *response) {
+    if (response == NULL) return -1;
+    ssize_t n = recv(fd, response, sizeof(FuelPacket), MSG_WAITALL);
+    return (n == (ssize_t)sizeof(FuelPacket)) ? 0 : -1;
+}
+
+// Send ACK_DIVERT packet to server. Returns 0 on success, -1 on failure.
+int sendAckDivert(socket_t fd, int aircraftID) {
+    FuelPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.type       = ACK_DIVERT;
+    pkt.header.aircraftID = aircraftID;
+    pkt.header.timestamp  = time(NULL);
+    ssize_t sent = send(fd, &pkt, sizeof(FuelPacket), 0);
     return (sent == (ssize_t)sizeof(FuelPacket)) ? 0 : -1;
 }
 
