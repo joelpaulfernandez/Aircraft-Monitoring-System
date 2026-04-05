@@ -36,6 +36,12 @@ int sendHandshake(socket_t fd, int aircraftID);
 // Send a FuelPacket. Returns 0 on success, -1 on failure.
 int sendFuelPacket(socket_t fd, const FuelPacket *packet);
 
+// Blocking recv of a FuelPacket response from server. Returns 0 on success, -1 on error.
+int recvServerResponse(socket_t fd, FuelPacket *response);
+
+// Send ACK_DIVERT packet to server. Returns 0 on success, -1 on failure.
+int sendAckDivert(socket_t fd, int aircraftID);
+
 // Close the socket.
 void disconnectFromServer(socket_t fd);
 

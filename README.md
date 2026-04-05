@@ -12,78 +12,184 @@ detects critical fuel states, and issues emergency divert commands when necessar
 
 ## Tech Stack
 - **Language**: C (C11)
-- **Communication**: TCP/IP (Winsock2 on Windows / sys/socket on Linux)
-- **Testing**: Custom C Unit Testing Harness (Integrated in Makefile)
+- **Communication**: TCP/IP (Winsock2 on Windows / sys/socket on Linux/macOS)
+- **Testing**: Custom C Unit Testing Harness (integrated in Makefile)
 - **Version Control**: GitHub
 
 ## Project Structure
 ```
 Aircraft-Monitoring-System/
-├── bin/                    # Compiled binaries (git ignored)
+├── bin/                          # Compiled binaries (git ignored)
 ├── client/
-│   ├── include/            # Client-specific headers
-│   ├── aircraft_state_machine.c # Fuel state machine logic (REQ-STM-010~040)
-│   ├── client.c            # Client communication logic
-│   └── main.c              # Client entry point
+│   ├── include/
+│   │   ├── client.h              # Client API declarations
+│   │   └── aircraft_state_machine.h
+│   ├── aircraft_state_machine.c  # Fuel state machine (REQ-STM-010~040)
+│   ├── client.c                  # TCP connection, send/recv helpers
+│   └── main.c                    # Client entry point (telemetry loop)
 ├── server/
-│   ├── include/            # Server-specific headers
-│   └── main.c              # Server entry point / logic
+│   ├── include/
+│   │   └── server.h              # Server API declarations
+│   └── main.c                    # Server entry point, recv loop, divert logic
 ├── common/
-│   ├── packet.h/c          # FuelPacket struct and utility functions
-│   └── logger.h/c          # Logging interface and implementation (REQ-LOG-060)
+│   ├── packet.h / packet.c       # FuelPacket struct, PacketType enum, utilities
+│   └── logger.h / logger.c       # Logging interface (REQ-LOG-060)
 ├── tests/
-│   └── unit/               # Unit tests for each module
-│       ├── test_fuel_system.c
-│       ├── test_client_connection.c
-│       └── test_server_connection.c
-├── Makefile                # Build system
+│   └── unit/
+│       ├── test_server_connection.c   # Server TCP/handshake tests
+│       ├── test_client_connection.c   # Client TCP/handshake tests
+│       ├── test_fuel_system.c         # State machine unit tests
+│       ├── test_packet.c              # Packet struct/validation tests
+│       ├── test_logger.c              # Logger unit tests
+│       ├── test_fuel_threshold.c      # Fuel threshold detection tests
+│       ├── test_divert_command.c      # Divert command unit tests
+│       └── test_divert_integration.c  # End-to-end divert integration tests
+├── Makefile
 └── README.md
 ```
+
+## Communication Protocol
+
+### Packet Types
+```c
+typedef enum {
+    FUEL_STATUS,   // Client → Server: telemetry update
+    LANDED_SAFE,   // Client → Server: aircraft landed, end session
+    ACK_DIVERT,    // Client → Server: divert command acknowledged
+    DIVERT_CMD     // Server → Client: emergency divert command
+} PacketType;
+```
+
+### Request-Reply Flow (one response per packet)
+```
+Client                              Server
+  |                                   |
+  |-- HANDSHAKE_REQ:<id>\n ---------->|
+  |<-- HANDSHAKE_ACK ----------------|
+  |                                   |
+  |-- FUEL_STATUS (FuelPacket) ------>|  updateAircraftRecord()
+  |                                   |  checkFuelThresholds()
+  |                                   |  evaluateDivertDecision()
+  |<-- DIVERT_CMD (FuelPacket) -------|    if divert needed
+  |   OR FUEL_STATUS ack ------------|    if normal
+  |                                   |
+  |-- ACK_DIVERT (FuelPacket) ------->|  rec->awaitingACK = false
+  |                                   |
+  |-- LANDED_SAFE (FuelPacket) ------>|  server closes session
+```
+
+### Divert Decision Logic
+The server issues `DIVERT_CMD` when **all** of the following are true:
+- `flightTimeRemaining < timeToDestination` (can't reach destination on current fuel)
+- The aircraft is not already in `STATE_EMERGENCY_DIVERT`
+- `awaitingACK == false` (no unconfirmed divert pending)
+
+The `DIVERT_CMD` packet carries `nearestAirportID` so the client knows where to divert.
 
 ## Fuel State Thresholds
 | State | Condition |
 |-------|-----------|
 | Normal Cruise | Fuel > 25% |
-| Low Fuel Warning | Fuel <= 25% |
-| Critical Fuel | Fuel <= 15% |
-| Emergency Divert | Divert command received from server |
+| Low Fuel Warning | Fuel ≤ 25% |
+| Critical Fuel | Fuel ≤ 15% |
+| Emergency Divert | `DIVERT_CMD` received from server |
 | Landed Safe | Aircraft confirmed landing |
 
 ## Data Packet Structure
 ```c
 typedef struct {
-    PacketHeader header;    // ID, type, aircraftID, timestamp
-    PacketBody body;        // fuelLevel, consumptionRate, states, etc.
+    PacketHeader header;   // packetID, type (PacketType), aircraftID, timestamp
+    PacketBody   body;     // fuelLevel, flightTimeRemaining, timeToDestination,
+                           // nearestAirportID, destinationAirportID, currentState, ...
 } FuelPacket;
 ```
 
-## Build and Test Instructions
+## Build Instructions
 
-### Build Server
+### Prerequisites
+- `gcc` (C11 support)
+- `make`
+- POSIX-compatible shell (Linux / macOS) **or** Windows with Winsock2
+
+### Build the server binary
 ```bash
-# Build server
 make server
+# output: bin/server
 ```
 
-### Run Unit Tests
-Tests are implemented using a custom C testing harness to ensure compatibility and lightweight execution without external dependencies.
+### Build and run (manual test)
+```bash
+# Terminal 1 — start server
+./bin/server
+
+# Terminal 2 — start client
+# (client binary not yet in Makefile; compile manually)
+gcc -Wall -std=c11 -Icommon -Iclient/include \
+    client/main.c client/client.c client/aircraft_state_machine.c common/packet.c common/logger.c \
+    -o bin/client
+./bin/client
+```
+
+The client connects to `127.0.0.1:8080` by default and begins sending `FUEL_STATUS`
+packets. Modify `client/main.c` (the `smInit` block and packet body fields) to simulate
+different fuel scenarios.
+
+## Running Tests
+
+Each test suite runs in isolation on its own port to avoid conflicts.
 
 ```bash
-# Run specific tests
-make test_fuel_system
-make test_client_connection
-make test_server_connection
-make test_packet
-make test_logger
+# Individual test suites
+make test                    # server connection tests       (port 18080)
+make test_client             # client connection tests       (port 18081)
+make test_packet             # packet struct/validation
+make test_logger             # logger
+make test_fuel_system        # state machine logic
+make test_fuel_threshold     # fuel threshold detection      (port 18080)
+make test_divert_command     # divert command unit tests     (port 18080)
+make test_divert_integration # end-to-end divert flow        (port 18082)
+
+# Run all tests at once
+make test_all
 ```
 
-## Project Progress (Phase 1)
-- [x] TCP/IP Socket connection setup
+Expected output for `make test_all`:
+```
+=== Server Connection Tests ===   ... 21/21 passed
+=== Client Connection Tests ===   ... 55/55 passed
+=== Packet Tests ===              ... 21/21 passed
+=== Logger Tests ===              ... 20/20 passed
+=== Fuel System Tests ===         ... 21/21 passed
+=== Fuel Threshold Tests ===      ... 41/41 passed
+=== Divert Command Tests ===      ... 21/21 passed
+=== Divert Integration Tests ===  ... 41/41 passed
+```
+
+## Project Progress
+
+### Phase 1 — Foundation
+- [x] TCP/IP socket connection setup (server + client)
 - [x] 3-way handshake verification logic
-- [x] Data packet (FuelPacket) structure definition
-- [x] Fuel State Machine skeleton and threshold logic
-- [x] Basic synchronous logging system
-- [x] Unit tests for core modules (Fuel, Packet, Connection)
+- [x] `FuelPacket` struct definition (`common/packet.h`)
+- [x] Fuel state machine skeleton and threshold logic
+- [x] Basic synchronous logging system (REQ-LOG-060)
+- [x] Unit tests for core modules (fuel, packet, connection, logger)
+
+### Phase 2 — Divert Decision Logic (Sprint 2)
+- [x] Fuel threshold detection logic (server-side `checkFuelThresholds`)
+- [x] Emergency divert command and ACK handling (`evaluateDivertDecision`, `broadcastDivertCommand`)
+- [x] `DIVERT_CMD` added to `PacketType` enum — server now sends structured `FuelPacket` instead of a raw string
+- [x] Server recv loop: receives `FUEL_STATUS`, evaluates divert, sends `DIVERT_CMD` or status ack
+- [x] `ACK_DIVERT` handling: server clears `awaitingACK` on receipt
+- [x] `LANDED_SAFE` handling: server closes session cleanly
+- [x] Client recv/ACK functions: `recvServerResponse()`, `sendAckDivert()`
+- [x] Client main loop: full telemetry loop with divert handling
+- [x] End-to-end integration tests (5 scenarios, 41 assertions)
+
+### Phase 2 — Remaining
+- [ ] 1 MB telemetry file transfer
+- [ ] Logging format finalization
+- [ ] UI implementation
 
 ## Log Format
 ```

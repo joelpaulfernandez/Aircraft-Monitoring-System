@@ -8,7 +8,8 @@
 typedef enum {
   FUEL_STATUS, // Regular fuel status report
   LANDED_SAFE, // Aircraft landed safely
-  ACK_DIVERT   // Acknowledgement of emergency divert command
+  ACK_DIVERT,  // Acknowledgement of emergency divert command
+  DIVERT_CMD   // Server → Client: emergency divert command
 } PacketType;
 
 // Aircraft fuel states
