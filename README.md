@@ -26,7 +26,8 @@ Aircraft-Monitoring-System/
 │   │   └── aircraft_state_machine.h
 │   ├── aircraft_state_machine.c  # Fuel state machine (REQ-STM-010~040)
 │   ├── client.c                  # TCP connection, send/recv helpers
-│   └── main.c                    # Client entry point (telemetry loop)
+│   ├── main.c                    # Client entry point (telemetry loop)
+│   └── demo_client.c             # Interactive demo client (manual testing)
 ├── server/
 │   ├── include/
 │   │   └── server.h              # Server API declarations
@@ -80,9 +81,12 @@ Client                              Server
 
 ### Divert Decision Logic
 The server issues `DIVERT_CMD` when **all** of the following are true:
-- `flightTimeRemaining < timeToDestination` (can't reach destination on current fuel)
+- `flightTimeRemaining < timeToDestination` (can't reach destination regardless of fuel state)
 - The aircraft is not already in `STATE_EMERGENCY_DIVERT`
 - `awaitingACK == false` (no unconfirmed divert pending)
+
+Fuel state (Normal/Low/Critical) does **not** gate the divert decision — if the aircraft
+cannot reach its destination, a divert is issued immediately.
 
 The `DIVERT_CMD` packet carries `nearestAirportID` so the client knows where to divert.
 
@@ -111,28 +115,32 @@ typedef struct {
 - `make`
 - POSIX-compatible shell (Linux / macOS) **or** Windows with Winsock2
 
-### Build the server binary
+### Build binaries
 ```bash
-make server
-# output: bin/server
+make server       # output: bin/server
+make demo_client  # output: bin/demo_client
 ```
 
-### Build and run (manual test)
+### Demo: interactive multi-client testing
 ```bash
 # Terminal 1 — start server
 ./bin/server
 
-# Terminal 2 — start client
-# (client binary not yet in Makefile; compile manually)
-gcc -Wall -std=c11 -Icommon -Iclient/include \
-    client/main.c client/client.c client/aircraft_state_machine.c common/packet.c common/logger.c \
-    -o bin/client
-./bin/client
+# Terminal 2, 3, 4 — each client with a unique aircraftID
+./bin/demo_client 101
+./bin/demo_client 102
+./bin/demo_client 103
 ```
 
-The client connects to `127.0.0.1:8080` by default and begins sending `FUEL_STATUS`
-packets. Modify `client/main.c` (the `smInit` block and packet body fields) to simulate
-different fuel scenarios.
+At the prompt, enter fuel parameters to send a `FUEL_STATUS` packet and see the server response:
+```
+[AC-101 | NORMAL_CRUISE] fuel> <fuelLevel> <flightTimeRemaining> <timeToDestination> [nearestAirportID]
+[AC-101 | NORMAL_CRUISE] fuel> land   # send LANDED_SAFE and exit
+[AC-101 | NORMAL_CRUISE] fuel> quit   # disconnect and exit
+```
+
+The server handles all clients concurrently (one pthread per client) and logs every
+received packet to the server terminal.
 
 ## Running Tests
 
@@ -156,10 +164,9 @@ make test_all
 Expected output for `make test_all`:
 ```
 === Server Connection Tests ===   ... 21/21 passed
-=== Client Connection Tests ===   ... 55/55 passed
-=== Packet Tests ===              ... 21/21 passed
-=== Logger Tests ===              ... 20/20 passed
-=== Fuel System Tests ===         ... 21/21 passed
+=== Client Connection Tests ===   ... 18/18 passed
+=== Packet Tests ===              ... 32/32 passed
+=== Logger Tests ===              ... 21/21 passed
 === Fuel Threshold Tests ===      ... 41/41 passed
 === Divert Command Tests ===      ... 21/21 passed
 === Divert Integration Tests ===  ... 41/41 passed
@@ -184,6 +191,9 @@ Expected output for `make test_all`:
 - [x] `LANDED_SAFE` handling: server closes session cleanly
 - [x] Client recv/ACK functions: `recvServerResponse()`, `sendAckDivert()`
 - [x] Client main loop: full telemetry loop with divert handling
+- [x] Multi-client support: server spawns one pthread per client connection
+- [x] Interactive demo client (`demo_client`) for manual multi-client testing
+- [x] Divert logic: triggers on `flightTimeRemaining < timeToDestination` regardless of fuel state
 - [x] End-to-end integration tests (5 scenarios, 41 assertions)
 
 ### Phase 2 — Remaining
