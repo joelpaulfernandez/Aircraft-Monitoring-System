@@ -11,6 +11,10 @@ Implements: initServer, acceptClient, performHandshake, validatePacket
 #include <string.h>
 #include <time.h>
 
+#ifndef TESTING
+#include <pthread.h>
+#endif
+
 #include "include/server.h"
 #include "../common/packet.h"
 
@@ -194,16 +198,18 @@ static void removeClientSlot(int aircraftID) {
 }
 
 // evaluateDivertDecision — REQ-SVR-030
-// Apply US5 divert decision logic: only divert when in CRITICAL_FUEL and
-// flightTimeRemaining < timeToDestination. Returns true if divert is needed.
+// Apply US5 divert decision logic: divert whenever the aircraft cannot reach
+// its destination (flightTimeRemaining < timeToDestination), regardless of
+// fuel state. Returns true if divert is needed.
 bool evaluateDivertDecision(int aircraftID) {
     int idx = findAircraftRecord(aircraftID);
     if (idx == -1) return false;
 
     AircraftRecord *rec = &aircraftRecords[idx];
 
-    // Only evaluate divert for CRITICAL_FUEL state
-    if (rec->currentState != STATE_CRITICAL_FUEL) return false;
+    // Do not re-issue if already in emergency divert or awaiting ACK
+    if (rec->currentState == STATE_EMERGENCY_DIVERT) return false;
+    if (rec->awaitingACK) return false;
 
     // US5: divert if aircraft cannot reach destination
     if (rec->flightTimeRemaining < rec->timeToDestination) return true;
@@ -389,8 +395,83 @@ bool validatePacket(const FuelPacket *packet) {
     return true;
 }
 
-// Main server loop
+// ─── Multi-client threading ──────────────────────────────────────────────────
 #ifndef TESTING
+
+// Protects clients[] and aircraftRecords[] from concurrent access.
+static pthread_mutex_t tableMutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+    socket_t clientFD;
+    int      aircraftID;
+} ClientArgs;
+
+static void *clientThreadFunc(void *arg) {
+    ClientArgs *ca         = (ClientArgs *)arg;
+    socket_t    clientFD   = ca->clientFD;
+    int         aircraftID = ca->aircraftID;
+    free(ca);
+
+    FuelPacket pkt;
+    while (1) {
+        ssize_t n = recv(clientFD, &pkt, sizeof(FuelPacket), MSG_WAITALL);
+        if (n != (ssize_t)sizeof(FuelPacket)) break;
+
+        pthread_mutex_lock(&tableMutex);
+
+        if (!validatePacket(&pkt)) {
+            LOG_WARNING(aircraftID, "Invalid packet — skipping");
+            pthread_mutex_unlock(&tableMutex);
+            continue;
+        }
+        if (pkt.header.aircraftID != aircraftID) {
+            LOG_WARNING(aircraftID, "Packet aircraftID mismatch — skipping");
+            pthread_mutex_unlock(&tableMutex);
+            continue;
+        }
+
+        if (pkt.header.type == ACK_DIVERT) {
+            handleAckDivert(aircraftID);
+            pthread_mutex_unlock(&tableMutex);
+            continue;
+        }
+
+        if (pkt.header.type == LANDED_SAFE) {
+            LOG_INFO(aircraftID, "Aircraft reported LANDED_SAFE");
+            pthread_mutex_unlock(&tableMutex);
+            break;
+        }
+
+        // FUEL_STATUS: update record, decide divert
+        updateAircraftRecord(&pkt);
+        FuelState state    = checkFuelThresholds(&pkt);
+        bool      dodivert = evaluateDivertDecision(aircraftID);
+
+        char logMsg[128];
+        snprintf(logMsg, sizeof(logMsg),
+                 "PACKET_RECV | Fuel: %.1f%% | FlightRem: %.1fmin | DestTime: %.1fmin | State: %s",
+                 pkt.body.fuelLevel,
+                 pkt.body.flightTimeRemaining,
+                 pkt.body.timeToDestination,
+                 fuelStateToString(state));
+        LOG_INFO(aircraftID, logMsg);
+
+        if (dodivert) broadcastDivertCommand(aircraftID);
+        pthread_mutex_unlock(&tableMutex);
+
+        if (!dodivert) sendStatusResponse(clientFD, aircraftID, state);
+    }
+
+    CLOSE_SOCKET(clientFD);
+
+    pthread_mutex_lock(&tableMutex);
+    removeClientSlot(aircraftID);
+    pthread_mutex_unlock(&tableMutex);
+
+    return NULL;
+}
+
+// Main server loop
 int main(void) {
     socket_t serverFD = initServer();
     if (serverFD == INVALID_SOCK) {
@@ -410,44 +491,33 @@ int main(void) {
             continue;
         }
 
-        // Receive FuelPacket loop (single-threaded: one client at a time).
-        FuelPacket pkt;
-        while (1) {
-            ssize_t n = recv(clientFD, &pkt, sizeof(FuelPacket), MSG_WAITALL);
-            if (n != (ssize_t)sizeof(FuelPacket)) break; // disconnect or error
+        // Clear the handshake recv timeout so the packet loop blocks indefinitely.
+#ifdef _WIN32
+        DWORD noTimeout = 0;
+        setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, (const char *)&noTimeout, sizeof(noTimeout));
+#else
+        struct timeval noTimeout = { 0, 0 };
+        setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &noTimeout, sizeof(noTimeout));
+#endif
 
-            if (!validatePacket(&pkt)) {
-                LOG_WARNING(aircraftID, "Invalid packet — skipping");
-                continue;
-            }
-            if (pkt.header.aircraftID != aircraftID) {
-                LOG_WARNING(aircraftID, "Packet aircraftID mismatch — skipping");
-                continue;
-            }
-
-            if (pkt.header.type == ACK_DIVERT) {
-                handleAckDivert(aircraftID);
-                continue;
-            }
-
-            if (pkt.header.type == LANDED_SAFE) {
-                LOG_INFO(aircraftID, "Aircraft reported LANDED_SAFE");
-                break;
-            }
-
-            // FUEL_STATUS: update record, evaluate divert decision
-            updateAircraftRecord(&pkt);
-            FuelState state = checkFuelThresholds(&pkt);
-
-            if (evaluateDivertDecision(aircraftID)) {
-                broadcastDivertCommand(aircraftID); // sends DIVERT_CMD as reply
-            } else {
-                sendStatusResponse(clientFD, aircraftID, state);
-            }
+        // Spawn a detached thread to handle this client concurrently.
+        ClientArgs *ca = malloc(sizeof(ClientArgs));
+        if (ca == NULL) {
+            LOG_ERROR(aircraftID, "malloc failed for client thread args");
+            CLOSE_SOCKET(clientFD);
+            continue;
         }
+        ca->clientFD   = clientFD;
+        ca->aircraftID = aircraftID;
 
-        CLOSE_SOCKET(clientFD);
-        removeClientSlot(aircraftID);
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, clientThreadFunc, ca) != 0) {
+            LOG_ERROR(aircraftID, "pthread_create failed");
+            free(ca);
+            CLOSE_SOCKET(clientFD);
+            continue;
+        }
+        pthread_detach(tid);
     }
 
     CLOSE_SOCKET(serverFD);

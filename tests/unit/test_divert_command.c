@@ -98,7 +98,7 @@ static void test_no_divert_when_equal_times(void) {
               "flightTimeRemaining == timeToDestination");
 }
 
-// Test 4: NO divert when state is not CRITICAL_FUEL (NORMAL)
+// Test 4: divert when NORMAL_CRUISE but cannot reach destination
 static void test_no_divert_when_normal_state(void) {
   FuelPacket pkt = makeTestPacket(101, 50.0f);
   pkt.body.flightTimeRemaining = 30.0f;
@@ -106,11 +106,11 @@ static void test_no_divert_when_normal_state(void) {
   updateAircraftRecord(&pkt);
 
   bool shouldDivert = evaluateDivertDecision(101);
-  TEST_ASSERT(shouldDivert == false,
-              "evaluateDivertDecision returns false in NORMAL_CRUISE state");
+  TEST_ASSERT(shouldDivert == true,
+              "evaluateDivertDecision returns true in NORMAL_CRUISE when cannot reach destination");
 }
 
-// Test 5: NO divert when state is LOW_FUEL (not yet critical)
+// Test 5: divert when LOW_FUEL and cannot reach destination
 static void test_no_divert_when_low_fuel_state(void) {
   FuelPacket pkt = makeTestPacket(101, 20.0f);
   pkt.body.flightTimeRemaining = 30.0f;
@@ -118,8 +118,8 @@ static void test_no_divert_when_low_fuel_state(void) {
   updateAircraftRecord(&pkt);
 
   bool shouldDivert = evaluateDivertDecision(101);
-  TEST_ASSERT(shouldDivert == false,
-              "evaluateDivertDecision returns false in LOW_FUEL state");
+  TEST_ASSERT(shouldDivert == true,
+              "evaluateDivertDecision returns true in LOW_FUEL when cannot reach destination");
 }
 
 // Test 6: NO divert for unknown aircraftID
