@@ -13,6 +13,7 @@ Implements: connectToServer, sendHandshake, sendFuelPacket, disconnectFromServer
 #include "include/client.h"
 #include "../common/packet.h"
 #include <stdint.h>
+#include "../common/logger.h"
 
 #define HANDSHAKE_BUF_LEN 64
 
@@ -65,8 +66,19 @@ int sendFuelPacket(socket_t fd, const FuelPacket *packet) {
 // Returns 0 on success, -1 on disconnect or error.
 int recvServerResponse(socket_t fd, FuelPacket *response) {
     if (response == NULL) return -1;
+
     ssize_t n = recv(fd, response, sizeof(FuelPacket), MSG_WAITALL);
-    return (n == (ssize_t)sizeof(FuelPacket)) ? 0 : -1;
+    if (n != (ssize_t)sizeof(FuelPacket)) return -1;
+
+  
+    if (response->header.type == DIVERT_CMD) {
+        logWrite(response->header.aircraftID, LOG_LEVEL_WARNING,
+                 "DIVERT_CMD received — receiving telemetry file");
+
+        receiveTelemetryFile(fd, response->header.aircraftID);
+    }
+
+    return 0;
 }
 
 // Send ACK_DIVERT packet to server. Returns 0 on success, -1 on failure.
@@ -83,4 +95,42 @@ int sendAckDivert(socket_t fd, int aircraftID) {
 // Close the socket.
 void disconnectFromServer(socket_t fd) {
     CLOSE_SOCKET(fd);
+}
+
+int receiveTelemetryFile(socket_t fd, int aircraftID) {
+    size_t file_size;
+
+    if (recv(fd, &file_size, sizeof(file_size), 0) <= 0) {
+        logWrite(aircraftID, LOG_LEVEL_ERROR, "Failed to receive file size");
+        return -1;
+    }
+
+    FILE *file = fopen("received_telemetry.bin", "wb");
+    if (!file) {
+        logWrite(aircraftID, LOG_LEVEL_ERROR, "Failed to open file");
+        return -1;
+    }
+
+    char buffer[4096];
+    size_t total_received = 0;
+
+    logWrite(aircraftID, LOG_LEVEL_INFO, "RECEIVE_START telemetry.bin");
+
+    while (total_received < file_size) {
+        int bytes = recv(fd, buffer, sizeof(buffer), 0);
+        if (bytes <= 0) break;
+
+        fwrite(buffer, 1, bytes, file);
+        total_received += bytes;
+    }
+
+    fclose(file);
+
+    if (total_received == file_size) {
+        logWrite(aircraftID, LOG_LEVEL_INFO, "RECEIVE_COMPLETE telemetry.bin");
+        return 0;
+    } else {
+        logWrite(aircraftID, LOG_LEVEL_ERROR, "RECEIVE_INCOMPLETE telemetry.bin");
+        return -1;
+    }
 }

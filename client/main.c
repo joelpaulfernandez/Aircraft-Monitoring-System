@@ -36,6 +36,7 @@ static FuelPacket buildFuelPacket(const AircraftStateMachine *sm, int packetID) 
 
 int main(void) {
 #ifdef _WIN32
+logInit("client.log");
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         fprintf(stderr, "WSAStartup failed\n");

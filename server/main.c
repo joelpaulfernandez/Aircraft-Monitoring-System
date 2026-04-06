@@ -445,6 +445,12 @@ static void *clientThreadFunc(void *arg) {
         // FUEL_STATUS: update record, decide divert
         updateAircraftRecord(&pkt);
         FuelState state    = checkFuelThresholds(&pkt);
+        if (pkt.header.type == FUEL_STATUS && pkt.body.fuelLevel < 10.0f) {
+        logWrite(aircraftID, LOG_LEVEL_WARNING,
+             "Low fuel detected — sending telemetry file");
+
+        sendTelemetryFile(clientFD, aircraftID);
+}
         bool      dodivert = evaluateDivertDecision(aircraftID);
 
         char logMsg[128];
@@ -473,6 +479,37 @@ static void *clientThreadFunc(void *arg) {
 
 // Main server loop
 int main(void) {
+    logInit("server.log");
+    int sendTelemetryFile(socket_t clientFD, int aircraftID) {
+    FILE *file = fopen("telemetry.bin", "rb");
+    if (!file) {
+        logWrite(aircraftID, LOG_LEVEL_ERROR, "Telemetry file not found");
+        return -1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    size_t file_size = ftell(file);
+    rewind(file);
+
+    send(clientFD, &file_size, sizeof(file_size), 0);
+
+    char buffer[4096];
+    size_t total_sent = 0;
+
+    logWrite(aircraftID, LOG_LEVEL_INFO, "SEND_FILE_START telemetry.bin");
+
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        send(clientFD, buffer, bytes, 0);
+        total_sent += bytes;
+    }
+
+    fclose(file);
+
+    logWrite(aircraftID, LOG_LEVEL_INFO, "SEND_FILE_COMPLETE telemetry.bin");
+
+    return 0;
+}
     socket_t serverFD = initServer();
     if (serverFD == INVALID_SOCK) {
         fprintf(stderr, "Failed to start server. Exiting.\n");
