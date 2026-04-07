@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c \"gcc --version\")",
+      "Bash(cmd /c \"where gcc\")"
+    ]
+  }
+}

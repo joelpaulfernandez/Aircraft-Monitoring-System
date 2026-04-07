@@ -35,7 +35,11 @@ void logWrite(int aircraftID, LogLevel level, const char *details) {
     time_t now = time(NULL);
     char timeBuf[20];
     struct tm tmBuf;
+#ifdef _WIN32
+    struct tm *tm = (localtime_s(&tmBuf, &now) == 0) ? &tmBuf : NULL;
+#else
     struct tm *tm = localtime_r(&now, &tmBuf);
+#endif
     if (tm != NULL) {
         strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", tm);
     } else {

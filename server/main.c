@@ -173,7 +173,7 @@ static int sendStatusResponse(socket_t clientFD, int aircraftID, FuelState state
     resp.header.aircraftID = aircraftID;
     resp.header.timestamp  = time(NULL);
     resp.body.currentState = state;
-    ssize_t sent = send(clientFD, &resp, sizeof(resp), 0);
+    ssize_t sent = send(clientFD, (const char *)&resp, sizeof(resp), 0);
     return (sent == (ssize_t)sizeof(resp)) ? 0 : -1;
 }
 
@@ -251,7 +251,7 @@ int broadcastDivertCommand(int aircraftID) {
         divertPkt.header.aircraftID  = aircraftID;
         divertPkt.header.timestamp   = time(NULL);
         divertPkt.body.nearestAirportID = rec->nearestAirportID;
-        send(clients[clientIdx].socketFD, &divertPkt, sizeof(divertPkt), 0);
+        send(clients[clientIdx].socketFD, (const char *)&divertPkt, sizeof(divertPkt), 0);
     }
 
     return 0;
@@ -398,6 +398,8 @@ bool validatePacket(const FuelPacket *packet) {
 // ─── Multi-client threading ──────────────────────────────────────────────────
 #ifndef TESTING
 
+static int sendTelemetryFile(socket_t clientFD, int aircraftID);
+
 // Protects clients[] and aircraftRecords[] from concurrent access.
 static pthread_mutex_t tableMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -477,10 +479,8 @@ static void *clientThreadFunc(void *arg) {
     return NULL;
 }
 
-// Main server loop
-int main(void) {
-    logInit("server.log");
-    int sendTelemetryFile(socket_t clientFD, int aircraftID) {
+// sendTelemetryFile — send telemetry.bin to a connected client
+static int sendTelemetryFile(socket_t clientFD, int aircraftID) {
     FILE *file = fopen("telemetry.bin", "rb");
     if (!file) {
         logWrite(aircraftID, LOG_LEVEL_ERROR, "Telemetry file not found");
@@ -488,10 +488,10 @@ int main(void) {
     }
 
     fseek(file, 0, SEEK_END);
-    size_t file_size = ftell(file);
+    size_t file_size = (size_t)ftell(file);
     rewind(file);
 
-    send(clientFD, &file_size, sizeof(file_size), 0);
+    send(clientFD, (const char *)&file_size, sizeof(file_size), 0);
 
     char buffer[4096];
     size_t total_sent = 0;
@@ -500,7 +500,7 @@ int main(void) {
 
     size_t bytes;
     while ((bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        send(clientFD, buffer, bytes, 0);
+        send(clientFD, buffer, (int)bytes, 0);
         total_sent += bytes;
     }
 
@@ -510,6 +510,10 @@ int main(void) {
 
     return 0;
 }
+
+// Main server loop
+int main(void) {
+    logInit("server.log");
     socket_t serverFD = initServer();
     if (serverFD == INVALID_SOCK) {
         fprintf(stderr, "Failed to start server. Exiting.\n");

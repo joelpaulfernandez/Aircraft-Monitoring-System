@@ -71,12 +71,14 @@ int recvServerResponse(socket_t fd, FuelPacket *response) {
     if (n != (ssize_t)sizeof(FuelPacket)) return -1;
 
   
+#ifndef TESTING
     if (response->header.type == DIVERT_CMD) {
         logWrite(response->header.aircraftID, LOG_LEVEL_WARNING,
                  "DIVERT_CMD received — receiving telemetry file");
 
         receiveTelemetryFile(fd, response->header.aircraftID);
     }
+#endif
 
     return 0;
 }
