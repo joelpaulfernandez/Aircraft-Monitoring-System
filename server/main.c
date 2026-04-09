@@ -494,14 +494,12 @@ static int sendTelemetryFile(socket_t clientFD, int aircraftID) {
     send(clientFD, (const char *)&file_size, sizeof(file_size), 0);
 
     char buffer[4096];
-    size_t total_sent = 0;
 
     logWrite(aircraftID, LOG_LEVEL_INFO, "SEND_FILE_START telemetry.bin");
 
     size_t bytes;
     while ((bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
         send(clientFD, buffer, (int)bytes, 0);
-        total_sent += bytes;
     }
 
     fclose(file);

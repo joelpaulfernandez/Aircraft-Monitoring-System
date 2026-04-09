@@ -45,4 +45,6 @@ int sendAckDivert(socket_t fd, int aircraftID);
 // Close the socket.
 void disconnectFromServer(socket_t fd);
 
+int receiveTelemetryFile(socket_t fd, int aircraftID);
+
 #endif /* CLIENT_H */
