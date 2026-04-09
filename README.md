@@ -197,7 +197,7 @@ Expected output for `make test_all`:
 - [x] End-to-end integration tests (5 scenarios, 41 assertions)
 
 ### Phase 2 — Remaining
-- [ ] 1 MB telemetry file transfer
+- [x] 1 MB telemetry file transfer
 - [ ] Logging format finalization
 - [ ] UI implementation
 
