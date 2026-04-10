@@ -447,12 +447,6 @@ static void *clientThreadFunc(void *arg) {
         // FUEL_STATUS: update record, decide divert
         updateAircraftRecord(&pkt);
         FuelState state    = checkFuelThresholds(&pkt);
-        if (pkt.header.type == FUEL_STATUS && pkt.body.fuelLevel < 10.0f) {
-        logWrite(aircraftID, LOG_LEVEL_WARNING,
-             "Low fuel detected — sending telemetry file");
-
-        sendTelemetryFile(clientFD, aircraftID);
-}
         bool      dodivert = evaluateDivertDecision(aircraftID);
 
         char logMsg[128];
@@ -464,7 +458,10 @@ static void *clientThreadFunc(void *arg) {
                  fuelStateToString(state));
         LOG_INFO(aircraftID, logMsg);
 
-        if (dodivert) broadcastDivertCommand(aircraftID);
+        if (dodivert) {
+            broadcastDivertCommand(aircraftID);
+            sendTelemetryFile(clientFD, aircraftID);
+        }
         pthread_mutex_unlock(&tableMutex);
 
         if (!dodivert) sendStatusResponse(clientFD, aircraftID, state);

@@ -198,8 +198,8 @@ Expected output for `make test_all`:
 
 ### Phase 2 — Remaining
 - [x] 1 MB telemetry file transfer
-- [ ] Logging format finalization
-- [ ] UI implementation
+- [x] Logging format finalization
+- [x] UI implementation (Replaced by interactive `demo_client` terminal UI)
 
 ## Log Format
 ```

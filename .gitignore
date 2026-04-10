@@ -51,3 +51,7 @@ $RECYCLE.BIN/
 # Test outputs
 tests/output/
 *.test.log
+
+# Telemetry files (runtime generated)
+telemetry.bin
+received_telemetry.bin
