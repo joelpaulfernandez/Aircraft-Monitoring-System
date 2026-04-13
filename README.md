@@ -1,22 +1,27 @@
 # Aircraft Fuel Monitoring System
+
 Group 1 - CSCN74000
 
 ## Overview
+
 A distributed client-server system that monitors aircraft fuel levels in real time,
 detects critical fuel states, and issues emergency divert commands when necessary.
 
 ## Team
+
 - Katarina Lukic
 - Chris Chae (Youngsu Chae)
 - Joel Paul Fernandez
 
 ## Tech Stack
+
 - **Language**: C (C11)
 - **Communication**: TCP/IP (Winsock2 on Windows / sys/socket on Linux/macOS)
 - **Testing**: Custom C Unit Testing Harness (integrated in Makefile)
 - **Version Control**: GitHub
 
 ## Project Structure
+
 ```
 Aircraft-Monitoring-System/
 ├── bin/                          # Compiled binaries (git ignored)
@@ -36,15 +41,20 @@ Aircraft-Monitoring-System/
 │   ├── packet.h / packet.c       # FuelPacket struct, PacketType enum, utilities
 │   └── logger.h / logger.c       # Logging interface (REQ-LOG-060)
 ├── tests/
-│   └── unit/
-│       ├── test_server_connection.c   # Server TCP/handshake tests
-│       ├── test_client_connection.c   # Client TCP/handshake tests
-│       ├── test_fuel_system.c         # State machine unit tests
-│       ├── test_packet.c              # Packet struct/validation tests
-│       ├── test_logger.c              # Logger unit tests
-│       ├── test_fuel_threshold.c      # Fuel threshold detection tests
-│       ├── test_divert_command.c      # Divert command unit tests
-│       └── test_divert_integration.c  # End-to-end divert integration tests
+│   ├── unit/
+│   │   ├── test_server_connection.c   # Server TCP/handshake tests
+│   │   ├── test_client_connection.c   # Client TCP/handshake tests
+│   │   ├── test_fuel_system.c         # State machine unit tests
+│   │   ├── test_packet.c              # Packet struct/validation tests
+│   │   ├── test_logger.c              # Logger unit tests
+│   │   ├── test_fuel_threshold.c      # Fuel threshold detection tests
+│   │   ├── test_divert_command.c      # Divert command unit tests
+│   │   ├── test_divert_integration.c  # End-to-end divert integration tests
+│   │   └── test_robustness.c          # Negative/boundary-value tests
+│   ├── system/
+│   │   └── test_system_multi_client.c # Multi-client system tests
+│   └── usability/
+│       └── test_usability.c           # UI/UX readability & format tests
 ├── Makefile
 └── README.md
 ```
@@ -52,6 +62,7 @@ Aircraft-Monitoring-System/
 ## Communication Protocol
 
 ### Packet Types
+
 ```c
 typedef enum {
     FUEL_STATUS,   // Client → Server: telemetry update
@@ -62,17 +73,18 @@ typedef enum {
 ```
 
 ### Request-Reply Flow (one response per packet)
+
 ```
 Client                              Server
   |                                   |
   |-- HANDSHAKE_REQ:<id>\n ---------->|
-  |<-- HANDSHAKE_ACK ----------------|
+  |<-- HANDSHAKE_ACK -----------------|
   |                                   |
   |-- FUEL_STATUS (FuelPacket) ------>|  updateAircraftRecord()
   |                                   |  checkFuelThresholds()
   |                                   |  evaluateDivertDecision()
   |<-- DIVERT_CMD (FuelPacket) -------|    if divert needed
-  |   OR FUEL_STATUS ack ------------|    if normal
+  |   OR FUEL_STATUS ack -------------|    if normal
   |                                   |
   |-- ACK_DIVERT (FuelPacket) ------->|  rec->awaitingACK = false
   |                                   |
@@ -80,7 +92,9 @@ Client                              Server
 ```
 
 ### Divert Decision Logic
+
 The server issues `DIVERT_CMD` when **all** of the following are true:
+
 - `flightTimeRemaining < timeToDestination` (can't reach destination regardless of fuel state)
 - The aircraft is not already in `STATE_EMERGENCY_DIVERT`
 - `awaitingACK == false` (no unconfirmed divert pending)
@@ -91,15 +105,17 @@ cannot reach its destination, a divert is issued immediately.
 The `DIVERT_CMD` packet carries `nearestAirportID` so the client knows where to divert.
 
 ## Fuel State Thresholds
-| State | Condition |
-|-------|-----------|
-| Normal Cruise | Fuel > 25% |
-| Low Fuel Warning | Fuel ≤ 25% |
-| Critical Fuel | Fuel ≤ 15% |
+
+| State            | Condition                         |
+| ---------------- | --------------------------------- |
+| Normal Cruise    | Fuel > 25%                        |
+| Low Fuel Warning | Fuel ≤ 25%                        |
+| Critical Fuel    | Fuel ≤ 15%                        |
 | Emergency Divert | `DIVERT_CMD` received from server |
-| Landed Safe | Aircraft confirmed landing |
+| Landed Safe      | Aircraft confirmed landing        |
 
 ## Data Packet Structure
+
 ```c
 typedef struct {
     PacketHeader header;   // packetID, type (PacketType), aircraftID, timestamp
@@ -111,17 +127,20 @@ typedef struct {
 ## Build Instructions
 
 ### Prerequisites
+
 - `gcc` (C11 support)
 - `make`
 - POSIX-compatible shell (Linux / macOS) **or** Windows with Winsock2
 
 ### Build binaries
+
 ```bash
 make server       # output: bin/server
 make demo_client  # output: bin/demo_client
 ```
 
 ### Demo: interactive multi-client testing
+
 ```bash
 # Terminal 1 — start server
 ./bin/server
@@ -133,6 +152,7 @@ make demo_client  # output: bin/demo_client
 ```
 
 At the prompt, enter fuel parameters to send a `FUEL_STATUS` packet and see the server response:
+
 ```
 [AC-101 | NORMAL_CRUISE] fuel> <fuelLevel> <flightTimeRemaining> <timeToDestination> [nearestAirportID]
 [AC-101 | NORMAL_CRUISE] fuel> land   # send LANDED_SAFE and exit
@@ -146,6 +166,19 @@ received packet to the server terminal.
 
 Each test suite runs in isolation on its own port to avoid conflicts.
 
+### Test Categories
+
+| Category      | Description                                                       | Suites                                                                             |
+| ------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Unit – Client | Client-side logic (state machine, connection)                     | `test_client`, `test_fuel_system`                                                  |
+| Unit – Server | Server-side logic (connection, packet, logger, threshold, divert) | `test`, `test_packet`, `test_logger`, `test_fuel_threshold`, `test_divert_command` |
+| Integration   | End-to-end client ↔ server protocol flow                          | `test_divert_integration`                                                          |
+| Robustness    | Negative/boundary-value/error handling                            | `test_robustness`                                                                  |
+| System        | Multi-client concurrent sessions, full lifecycle                  | `test_system`                                                                      |
+| Usability     | UI readability, log format compliance, user feedback              | `test_usability`                                                                   |
+
+### Commands
+
 ```bash
 # Individual test suites
 make test                    # server connection tests       (port 18080)
@@ -156,25 +189,33 @@ make test_fuel_system        # state machine logic
 make test_fuel_threshold     # fuel threshold detection      (port 18080)
 make test_divert_command     # divert command unit tests     (port 18080)
 make test_divert_integration # end-to-end divert flow        (port 18082)
+make test_robustness         # negative/boundary tests       (port 18080)
+make test_system             # multi-client system tests     (port 18083)
+make test_usability          # usability/readability tests
 
 # Run all tests at once
 make test_all
 ```
 
 Expected output for `make test_all`:
+
 ```
-=== Server Connection Tests ===   ... 21/21 passed
-=== Client Connection Tests ===   ... 18/18 passed
-=== Packet Tests ===              ... 32/32 passed
-=== Logger Tests ===              ... 21/21 passed
-=== Fuel Threshold Tests ===      ... 41/41 passed
-=== Divert Command Tests ===      ... 21/21 passed
-=== Divert Integration Tests ===  ... 41/41 passed
+=== Server Connection Tests ===         ... 21/21 passed
+=== Client Connection Tests ===         ... 18/18 passed
+=== Packet Tests ===                    ... 32/32 passed
+=== Logger Tests ===                    ... 21/21 passed
+=== Fuel Threshold Tests ===            ... 41/41 passed
+=== Divert Command Tests ===            ... 21/21 passed
+=== Divert Integration Tests ===        ... 41/41 passed
+=== Robustness Tests ===                ... 37/37 passed
+=== System Multi-Client Tests ===       ... 49/49 passed
+=== Usability Tests ===                 ... 27/27 passed
 ```
 
 ## Project Progress
 
 ### Phase 1 — Foundation
+
 - [x] TCP/IP socket connection setup (server + client)
 - [x] 3-way handshake verification logic
 - [x] `FuelPacket` struct definition (`common/packet.h`)
@@ -183,6 +224,7 @@ Expected output for `make test_all`:
 - [x] Unit tests for core modules (fuel, packet, connection, logger)
 
 ### Phase 2 — Divert Decision Logic (Sprint 2)
+
 - [x] Fuel threshold detection logic (server-side `checkFuelThresholds`)
 - [x] Emergency divert command and ACK handling (`evaluateDivertDecision`, `broadcastDivertCommand`)
 - [x] `DIVERT_CMD` added to `PacketType` enum — server now sends structured `FuelPacket` instead of a raw string
@@ -197,11 +239,13 @@ Expected output for `make test_all`:
 - [x] End-to-end integration tests (5 scenarios, 41 assertions)
 
 ### Phase 2 — Remaining
+
 - [x] 1 MB telemetry file transfer
 - [x] Logging format finalization
 - [x] UI implementation (Replaced by interactive `demo_client` terminal UI)
 
 ## Log Format
+
 ```
 DateTime | TYPE | AircraftID | Details
 2026-03-30 21:45:11 | PACKET_RECV | AC-101 | Fuel: 12.4% | State: CRITICAL_FUEL
